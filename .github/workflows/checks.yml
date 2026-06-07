@@ -1,0 +1,37 @@
+name: checks
+
+# Lightweight PR/branch checks. These do NOT build the toolchain — that happens
+# only on a version tag (see release.yml). Keeps push/PR feedback fast (<1 min):
+# Starlark/BUILD analysis, shell syntax, and Python compile.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bazelisk
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/bazelisk \
+            https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
+          sudo chmod +x /usr/local/bin/bazelisk
+          sudo ln -sf /usr/local/bin/bazelisk /usr/local/bin/bazel
+
+      - name: Shell syntax
+        run: |
+          for f in build/build-stages.sh build/package.sh tests/smoke-test.sh; do
+            bash -n "$f"
+          done
+
+      - name: Python compile
+        run: python3 -m py_compile scripts/lock.py
+
+      - name: Bazel analysis (loads .bzl + BUILD, no toolchain build)
+        run: bazelisk build --config=ci --nobuild //...

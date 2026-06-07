@@ -1,0 +1,41 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Each smoke test extracts the matching toolchain tarball to a fresh directory
+# (proving relocatability), compiles hello.c/hello.cc, and asserts PE class +
+# UCRT linkage. `.exe` files are not executed (no wine dependency in CI).
+
+sh_test(
+    name = "smoke_x86_64",
+    srcs = ["smoke-test.sh"],
+    args = [
+        "--target=x86_64-w64-mingw32",
+        "--expect-class=PE32+",
+        "$(rootpaths //:toolchain_x86_64)",
+        "$(rootpath hello.c)",
+        "$(rootpath hello.cc)",
+    ],
+    data = [
+        "hello.c",
+        "hello.cc",
+        "//:toolchain_x86_64",
+    ],
+    tags = ["requires-toolchain-build"],
+)
+
+sh_test(
+    name = "smoke_i686",
+    srcs = ["smoke-test.sh"],
+    args = [
+        "--target=i686-w64-mingw32",
+        "--expect-class=PE32",
+        "$(rootpaths //:toolchain_i686)",
+        "$(rootpath hello.c)",
+        "$(rootpath hello.cc)",
+    ],
+    data = [
+        "hello.c",
+        "hello.cc",
+        "//:toolchain_i686",
+    ],
+    tags = ["requires-toolchain-build"],
+)

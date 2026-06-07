@@ -1,0 +1,20 @@
+# Bazel 9 is bzlmod-only; keep config explicit and reproducible.
+common --enable_bzlmod
+
+# The toolchain build action shells out to autotools and writes a large tree.
+# It is NOT a normal hermetic compile action, so give it room and don't let
+# Bazel try to sandbox-strip the host build tools it legitimately needs.
+build --sandbox_default_allow_network=false
+build --verbose_failures
+build --experimental_reuse_sandbox_directories
+
+# Building GCC is slow; surface progress and don't time out analysis-cached runs.
+build --show_timestamps
+test --test_output=errors
+
+# CI uses this config: more logging, no curses, fail fast on flaky infra.
+build:ci --curses=no
+build:ci --color=no
+build:ci --announce_rc
+test:ci --curses=no
+test:ci --color=no

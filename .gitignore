@@ -1,0 +1,18 @@
+# Bazel symlinks (bazel-bin, bazel-out, bazel-<workspace>, bazel-testlogs)
+/bazel-*
+# Release staging
+/dist/
+# go-task local cache (only created if a task uses sources:/status:)
+/.task/
+# Editor / OS noise
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/
+# Python bytecode (scripts/lock.py)
+__pycache__/
+*.pyc
+
+# NOTE: MODULE.bazel.lock is intentionally NOT ignored — it is committed so the
+# resolved BCR module graph is reproducible.

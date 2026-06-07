@@ -1,0 +1,26 @@
+load("//bazel:toolchain_build.bzl", "mingw_toolchain")
+
+package(default_visibility = ["//visibility:public"])
+
+# The two shipped flavors. EH model is encoded in each artifact name.
+mingw_toolchain(
+    name = "toolchain_x86_64",
+    target = "x86_64-w64-mingw32",
+    exceptions = "seh",
+)
+
+mingw_toolchain(
+    name = "toolchain_i686",
+    target = "i686-w64-mingw32",
+    exceptions = "dw2",
+)
+
+# `bazel build //:all_toolchains` builds both tarballs.
+filegroup(
+    name = "all_toolchains",
+    srcs = [
+        ":toolchain_i686",
+        ":toolchain_x86_64",
+    ],
+    visibility = ["//visibility:public"],
+)

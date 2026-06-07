@@ -1,0 +1,19 @@
+# Target platforms downstream repos build against:
+#   bazel build //:app --platforms=@windows_toolchains//platforms:windows_x64
+package(default_visibility = ["//visibility:public"])
+
+platform(
+    name = "windows_x64",
+    constraint_values = [
+        "@platforms//os:windows",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+platform(
+    name = "windows_x86",
+    constraint_values = [
+        "@platforms//os:windows",
+        "@platforms//cpu:x86_32",
+    ],
+)

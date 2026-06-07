@@ -1,0 +1,110 @@
+name: release
+
+# Build + smoke test + publish run ONLY on a version tag. Pushing to a branch
+# does not build the toolchains (see checks.yml for the lightweight PR checks).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Phase 1: build each flavor's tarball ──────────────────────────────────
+  build:
+    # ubuntu-24.04 ships glibc 2.39. REQUIRED: stages 5–7 run the freshly built
+    # cross gcc (linked against Bootlin's glibc 2.39), so the runner's glibc must
+    # be >= the toolchain floor. ubuntu-22.04 (glibc 2.35) would fail here.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { flavor: x86_64, target: x86_64-w64-mingw32 }
+          - { flavor: i686, target: i686-w64-mingw32 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host build helpers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bison flex texinfo gawk gperf \
+            file rsync xz-utils zstd curl ca-certificates python3
+
+      - name: Install bazelisk
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/bazelisk \
+            https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
+          sudo chmod +x /usr/local/bin/bazelisk
+          sudo ln -sf /usr/local/bin/bazelisk /usr/local/bin/bazel
+
+      - name: Build ${{ matrix.flavor }}
+        run: |
+          bazelisk build --config=ci \
+            --action_env=GIT_COMMIT=${GITHUB_SHA} \
+            //:toolchain_${{ matrix.flavor }}
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          find bazel-bin -maxdepth 1 \( -name '*.tar.xz' -o -name '*.tar.xz.sha256' \) \
+            -exec cp -f {} dist/ \;
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-${{ matrix.flavor }}
+          path: dist/*
+          if-no-files-found: error
+
+  # ── Phase 2: smoke test the built tarballs (after build, release-only) ─────
+  smoke-test:
+    needs: build
+    # Same glibc-2.39 requirement: this runs the cross gcc from the tarball.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { flavor: x86_64, target: x86_64-w64-mingw32, expect: "PE32+" }
+          - { flavor: i686, target: i686-w64-mingw32, expect: "PE32" }
+    steps:
+      - uses: actions/checkout@v4 # for tests/smoke-test.sh + hello.{c,cc}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: toolchain-${{ matrix.flavor }}
+          path: dist
+
+      # Standalone: extracts the tarball to a fresh dir (relocatability check),
+      # compiles hello.c/.cc, asserts PE class + UCRT linkage. No Bazel rebuild.
+      - name: Smoke test ${{ matrix.flavor }}
+        run: |
+          tarball="$(find dist -name '*.tar.xz' | head -1)"
+          test -n "$tarball" || { echo "no tarball in artifact" >&2; exit 1; }
+          bash tests/smoke-test.sh \
+            --target=${{ matrix.target }} \
+            --expect-class='${{ matrix.expect }}' \
+            "$tarball" tests/hello.c tests/hello.cc
+
+  # ── Phase 3: publish to the GitHub release (only after smoke passes) ───────
+  publish:
+    needs: smoke-test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find artifacts -type f -print
+          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 \
+            || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+                 --title "${GITHUB_REF_NAME}" \
+                 --notes "MinGW-w64/UCRT cross toolchains (GCC, posix threads). See manifest.json in each tarball."
+          gh release upload "${GITHUB_REF_NAME}" $(find artifacts -type f) --clobber \
+            --repo "${GITHUB_REPOSITORY}"

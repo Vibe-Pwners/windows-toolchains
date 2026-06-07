@@ -1,0 +1,76 @@
+version: "3"
+
+# Orchestration entrypoint. Bazel drives the actual GCC/CRT bootstrap; Taskfile
+# wraps it and owns the release-upload glue Bazel shouldn't do.
+
+vars:
+  BAZEL: bazelisk
+  DIST: dist
+
+tasks:
+  default:
+    desc: List available tasks.
+    cmds:
+      - task --list
+    silent: true
+
+  deps:
+    desc: Install host build helpers (Debian/Ubuntu). The compiler itself is pinned (Bootlin).
+    cmds:
+      - sudo apt-get update
+      - >
+        sudo apt-get install -y build-essential bison flex texinfo gawk gperf
+        file rsync xz-utils zstd curl ca-certificates python3
+
+  build:
+    desc: Build both toolchain tarballs (x86_64-SEH, i686-DW2).
+    cmds:
+      - "{{.BAZEL}} build {{.CONFIG}} //:all_toolchains"
+
+  build-x86_64:
+    desc: Build only the x86_64-w64-mingw32 (SEH) toolchain.
+    cmds:
+      - "{{.BAZEL}} build {{.CONFIG}} //:toolchain_x86_64"
+
+  build-i686:
+    desc: Build only the i686-w64-mingw32 (DW2) toolchain.
+    cmds:
+      - "{{.BAZEL}} build {{.CONFIG}} //:toolchain_i686"
+
+  test:
+    desc: Smoke-test both toolchains (compile + PE/UCRT assertions).
+    cmds:
+      - "{{.BAZEL}} test {{.CONFIG}} //tests/..."
+
+  package:
+    desc: Collect built tarballs + checksums into ./dist.
+    deps: [build]
+    cmds:
+      - mkdir -p {{.DIST}}
+      - find bazel-bin -maxdepth 1 -name '*.tar.xz' -o -name '*.tar.xz.sha256' | xargs -I{} cp -f {} {{.DIST}}/
+      - ls -l {{.DIST}}
+
+  verify:
+    desc: Verify SHA256 pins still match upstream (no rewrite). Used in CI.
+    cmds:
+      - python3 scripts/lock.py --check
+
+  lock:
+    desc: Recompute SHA256 pins, rewrite bazel/versions.bzl and versions.lock.
+    cmds:
+      - python3 scripts/lock.py
+
+  release:
+    desc: "Build, test, package, then upload to a GitHub release. Usage: task release TAG=v0.1.0"
+    requires:
+      vars: [TAG]
+    deps: [test, package]
+    cmds:
+      - 'gh release view {{.TAG}} >/dev/null 2>&1 || gh release create {{.TAG}} --title {{.TAG}} --notes "Automated toolchain release {{.TAG}}"'
+      - gh release upload {{.TAG}} {{.DIST}}/* --clobber
+
+  clean:
+    desc: Remove dist/ and the Bazel output tree.
+    cmds:
+      - rm -rf {{.DIST}}
+      - "{{.BAZEL}} clean"

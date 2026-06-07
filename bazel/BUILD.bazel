@@ -1,0 +1,10 @@
+# Starlark sources live here; expose them so other packages can load() them.
+exports_files(
+    [
+        "versions.bzl",
+        "repositories.bzl",
+        "toolchain_build.bzl",
+        "consume.bzl",
+    ],
+    visibility = ["//visibility:public"],
+)

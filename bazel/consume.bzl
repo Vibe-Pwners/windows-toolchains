@@ -1,0 +1,136 @@
+"""Downstream consumer helpers: turn a published tarball into a Bazel cc_toolchain.
+
+A consuming repo fetches a release asset and instantiates a toolchain in the
+extracted package, e.g. in its MODULE.bazel/WORKSPACE:
+
+    http_archive(
+        name = "mingw_x86_64_ucrt",
+        url = "https://github.com/USER/windows-toolchains/releases/download/vX/<root>.tar.xz",
+        sha256 = "...",
+        strip_prefix = "<root>",
+        build_file_content = '''
+load("@windows_toolchains//bazel:consume.bzl", "mingw_cc_toolchain")
+mingw_cc_toolchain(name = "toolchain", target = "x86_64-w64-mingw32", cpu = "x86_64")
+''',
+    )
+
+then `register_toolchains("@mingw_x86_64_ucrt//:toolchain")` and build with
+`--platforms=@windows_toolchains//platforms:windows_x64`.
+
+Runtime linkage is STATIC by default (-static-libgcc -static-libstdc++ -static,
+static winpthreads) so produced .exe are self-contained; the shared DLLs are still
+present in the tarball for those who prefer them (set static_runtime = False).
+"""
+
+load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
+load("@rules_cc//cc:defs.bzl", "CcToolchainConfigInfo", "cc_common", "cc_toolchain")
+load(
+    "@rules_cc//cc:cc_toolchain_config_lib.bzl",
+    "feature",
+    "flag_group",
+    "flag_set",
+    "tool_path",
+)
+
+_LINK_ACTIONS = [
+    ACTION_NAMES.cpp_link_executable,
+    ACTION_NAMES.cpp_link_dynamic_library,
+    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
+]
+
+def _config_impl(ctx):
+    tools = ctx.attr.target + "-"
+    tool_paths = [
+        tool_path(name = "gcc", path = "bin/%sgcc" % tools),
+        tool_path(name = "cpp", path = "bin/%scpp" % tools),
+        tool_path(name = "ar", path = "bin/%sar" % tools),
+        tool_path(name = "gcov", path = "bin/%sgcov" % tools),
+        tool_path(name = "ld", path = "bin/%sld" % tools),
+        tool_path(name = "nm", path = "bin/%snm" % tools),
+        tool_path(name = "objdump", path = "bin/%sobjdump" % tools),
+        tool_path(name = "strip", path = "bin/%sstrip" % tools),
+    ]
+
+    features = []
+    if ctx.attr.static_runtime:
+        features.append(feature(
+            name = "static_runtime",
+            enabled = True,
+            flag_sets = [flag_set(
+                actions = _LINK_ACTIONS,
+                flag_groups = [flag_group(flags = [
+                    "-static-libgcc",
+                    "-static-libstdc++",
+                    "-static",
+                    "-Wl,-Bstatic,--whole-archive",
+                    "-lwinpthread",
+                    "-Wl,--no-whole-archive,-Bdynamic",
+                ])],
+            )],
+        ))
+
+    return cc_common.create_cc_toolchain_config_info(
+        ctx = ctx,
+        toolchain_identifier = "mingw-%s" % ctx.attr.target,
+        host_system_name = "x86_64-linux-gnu",
+        target_system_name = ctx.attr.target,
+        target_cpu = ctx.attr.cpu,
+        target_libc = "ucrt",
+        compiler = "gcc",
+        abi_version = ctx.attr.target,
+        abi_libc_version = "ucrt",
+        tool_paths = tool_paths,
+        features = features,
+        # Best-effort: consumers can pass absolute include dirs (e.g. discovered
+        # via `$TARGET-gcc -print-sysroot`) to silence undeclared-inclusion errors.
+        cxx_builtin_include_directories = ctx.attr.builtin_include_dirs,
+    )
+
+mingw_cc_toolchain_config = rule(
+    implementation = _config_impl,
+    attrs = {
+        "target": attr.string(mandatory = True),
+        "cpu": attr.string(mandatory = True),
+        "static_runtime": attr.bool(default = True),
+        "builtin_include_dirs": attr.string_list(default = []),
+    },
+    provides = [CcToolchainConfigInfo],
+)
+
+def mingw_cc_toolchain(name, target, cpu, static_runtime = True, builtin_include_dirs = []):
+    """Define a cc_toolchain (+ registration target) over the extracted tarball."""
+    native.filegroup(
+        name = "%s_all" % name,
+        srcs = native.glob(["**"], allow_empty = False),
+    )
+
+    mingw_cc_toolchain_config(
+        name = "%s_config" % name,
+        target = target,
+        cpu = cpu,
+        static_runtime = static_runtime,
+        builtin_include_dirs = builtin_include_dirs,
+    )
+
+    cc_toolchain(
+        name = "%s_cc" % name,
+        toolchain_config = ":%s_config" % name,
+        all_files = ":%s_all" % name,
+        compiler_files = ":%s_all" % name,
+        linker_files = ":%s_all" % name,
+        dwp_files = ":%s_all" % name,
+        objcopy_files = ":%s_all" % name,
+        strip_files = ":%s_all" % name,
+        supports_param_files = 1,
+    )
+
+    os_constraint = "@platforms//os:windows"
+    cpu_constraint = "@platforms//cpu:x86_64" if cpu == "x86_64" else "@platforms//cpu:x86_32"
+
+    native.toolchain(
+        name = name,
+        toolchain = ":%s_cc" % name,
+        toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+        target_compatible_with = [os_constraint, cpu_constraint],
+        visibility = ["//visibility:public"],
+    )

@@ -1,0 +1,24 @@
+"""windows-toolchains: build Linux x86_64 -> Windows MinGW-w64/UCRT toolchains."""
+
+module(
+    name = "windows_toolchains",
+    version = "0.1.0",
+)
+
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+
+# Pinned upstream sources + Bootlin host toolchain (see //bazel:versions.bzl).
+sources = use_extension("//bazel:repositories.bzl", "sources")
+use_repo(
+    sources,
+    "gcc_src",
+    "binutils_src",
+    "mingw_src",
+    "gmp_src",
+    "mpfr_src",
+    "mpc_src",
+    "bootlin_host",
+)
