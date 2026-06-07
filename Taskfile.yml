@@ -47,7 +47,8 @@ tasks:
     deps: [build]
     cmds:
       - mkdir -p {{.DIST}}
-      - find bazel-bin -maxdepth 1 -name '*.tar.xz' -o -name '*.tar.xz.sha256' | xargs -I{} cp -f {} {{.DIST}}/
+      # bazel-bin is a symlink; use a shell glob (find without -L won't descend it).
+      - cp -f bazel-bin/*.tar.xz bazel-bin/*.tar.xz.sha256 {{.DIST}}/
       - ls -l {{.DIST}}
 
   verify:

@@ -48,8 +48,8 @@ jobs:
       - name: Stage artifacts
         run: |
           mkdir -p dist
-          find bazel-bin -maxdepth 1 \( -name '*.tar.xz' -o -name '*.tar.xz.sha256' \) \
-            -exec cp -f {} dist/ \;
+          # bazel-bin is a symlink; use a shell glob (find without -L won't descend).
+          cp -f bazel-bin/*.tar.xz bazel-bin/*.tar.xz.sha256 dist/
           ls -l dist
 
       - uses: actions/upload-artifact@v4
